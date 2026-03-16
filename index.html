@@ -933,19 +933,49 @@ function clearSyncUrl() {
 
 async function gsPost(payload) {
   if (!gsUrl) return;
-  try {
-    setSyncStatus('syncing');
-    fetch(gsUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    }).then(() => setSyncStatus('ok', 'Synced to Sheets'))
-      .catch(() => setSyncStatus('ok', 'Sent to Sheets'));
-    // no-cors never throws or returns readable response — we optimistically show synced
-  } catch(e) {
-    setSyncStatus('ok', 'Sent to Sheets');
-  }
+  setSyncStatus('syncing');
+  return new Promise((resolve) => {
+    try {
+      // Use script tag injection — the only method that reliably bypasses
+      // CORS restrictions when calling Google Apps Script from a webpage
+      const callbackName = 'gs_cb_' + Date.now();
+      const encoded = encodeURIComponent(JSON.stringify(payload));
+      const script = document.createElement('script');
+      let done = false;
+
+      window[callbackName] = function(response) {
+        done = true;
+        delete window[callbackName];
+        script.remove();
+        setSyncStatus('ok', 'Synced to Sheets');
+        resolve(response);
+      };
+
+      // Timeout fallback after 10s
+      setTimeout(() => {
+        if (!done) {
+          delete window[callbackName];
+          script.remove();
+          setSyncStatus('ok', 'Sent to Sheets');
+          resolve();
+        }
+      }, 10000);
+
+      script.src = gsUrl + '?callback=' + callbackName + '&data=' + encoded;
+      script.onerror = () => {
+        if (!done) {
+          done = true;
+          delete window[callbackName];
+          setSyncStatus('err');
+          resolve();
+        }
+      };
+      document.head.appendChild(script);
+    } catch(e) {
+      setSyncStatus('err');
+      resolve();
+    }
+  });
 }
 
 async function pushAllToSheets() {
