@@ -400,11 +400,44 @@ let invoices = JSON.parse(localStorage.getItem('ll_invoices') || '[]');
 let expenses = JSON.parse(localStorage.getItem('ll_expenses') || '[]');
 let lineItems = [{desc:'',qty:1,rate:0}];
 let mainChartInst = null, pieChartInst = null;
-let currentReceiptData = null; // base64 string of current receipt being added
+let currentReceiptData = null;
 
 function save() {
   localStorage.setItem('ll_invoices', JSON.stringify(invoices));
   localStorage.setItem('ll_expenses', JSON.stringify(expenses));
+}
+
+function loadFromSheets() {
+  if (!gsUrl) return;
+  setSyncStatus('syncing');
+  const callbackName = 'gs_load_' + Date.now();
+  const script = document.createElement('script');
+  let done = false;
+
+  window[callbackName] = function(response) {
+    done = true;
+    delete window[callbackName];
+    script.remove();
+    if (response && response.invoices) {
+      invoices = response.invoices;
+      expenses = response.expenses || [];
+      localStorage.setItem('ll_invoices', JSON.stringify(invoices));
+      localStorage.setItem('ll_expenses', JSON.stringify(expenses));
+      renderAll();
+    }
+    setSyncStatus('ok', 'Synced to Sheets');
+  };
+
+  setTimeout(() => {
+    if (!done) {
+      delete window[callbackName];
+      script.remove();
+      setSyncStatus('ok', 'Synced to Sheets');
+    }
+  }, 8000);
+
+  script.src = gsUrl + '?callback=' + callbackName + '&action=load';
+  document.head.appendChild(script);
 }
 
 function fmt(n, sym) {
@@ -1004,6 +1037,13 @@ function save() {
 
 // Init sync UI
 updateSyncUI();
+if (gsUrl) loadFromSheets();
+
+function renderAll() {
+  renderDashboard();
+  renderInvTable();
+  renderExpTable();
+}
 
 // Event listeners for live preview
 ['inv-from','inv-client','inv-from-addr','inv-client-addr','inv-from-email','inv-client-email','inv-num','inv-date','inv-due','inv-notes','inv-currency','inv-taxrate'].forEach(id => {
